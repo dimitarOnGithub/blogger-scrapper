@@ -1,4 +1,5 @@
 import warnings
+from ctypes import Union
 from datetime import datetime
 from bs4.element import Tag
 import urllib3
@@ -101,20 +102,20 @@ class Blogsite:
             raise AttributeError(f"Unable to find neither an Atom feed, nor an RSS feed for '{site}'")
         elif feed == "atom" and self.atom_link is None:
             warnings.warn(f"Couldn't find the preferred feed 'Atom', falling back to 'RSS'")
-            self.blog_feed = Feed(self.rss_link, "rss")
+            self.blog_feed = Feed(self.rss_link, "rss", site_encoding=self._encoding)
         elif feed == "rss" and self.rss_link is None:
             warnings.warn(f"Couldn't find the preferred feed 'RSS', falling back to 'Atom'")
-            self.blog_feed = Feed(self.atom_link, "atom")
+            self.blog_feed = Feed(self.atom_link, "atom", site_encoding=self._encoding)
         else:
             if feed == "atom":
-                self.blog_feed = Feed(self.atom_link, "atom")
+                self.blog_feed = Feed(self.atom_link, "atom", site_encoding=self._encoding)
             else:
-                self.blog_feed = Feed(self.rss_link, "rss")
+                self.blog_feed = Feed(self.rss_link, "rss", site_encoding=self._encoding)
 
 
 class Feed:
 
-    def __init__(self, url, feed_type):
+    def __init__(self, url, feed_type, site_encoding="UTF-8"):
         """ Constructor for the Feed object used to work with the Blogger site.
 
         :param url: URL to the feed.
@@ -127,6 +128,7 @@ class Feed:
 
         self.url = url
         self.feed_type = feed_type
+        self.site_encoding = site_encoding
         self.current_page = 0
         self.pages = 0
         self.total_results = 0
@@ -137,7 +139,7 @@ class Feed:
         except NewConnectionError:
             raise ConnectionError(f"Failed to load '{self.feed_type}' at '{self.url}'")
 
-        self.feed_data = BeautifulSoup(_conn.data, features="lxml")
+        self.feed_data = BeautifulSoup(_conn.data.decode(self.site_encoding), features="lxml")
         try:
             _start_index = int(self.feed_data.find('opensearch:startindex').text)
             _total_results = int(self.feed_data.find('opensearch:totalresults').text)
@@ -166,24 +168,25 @@ class Feed:
                     self.next_page_url = link.get('href')
 
     def fetch_first(self):
-        """ TODO: add docs
+        """ Method fetches the first article in the current feed stream.
 
-        :return:
-        :rtype:
+        :return: BlogArticle object, either BlogRSSArticle or BlogAtomArticle
+        :rtype: Union[BlogRSSArticle, BlogAtomArticle]
         """
         if self.feed_type == "rss":
             first_article = self.feed_data.find("item")
             blog_article = BlogRSSArticle(article_tag=first_article)
         else:
             first_article = self.feed_data.find("entry")
-            blog_article = BlogAtomArticle(article_tag=first_article)
+            blog_article = BlogAtomArticle(article_tag=first_article, encoding=self.site_encoding)
         return blog_article
 
     def fetch_all(self):
-        """ TODO: add docs
+        """ Method fetches all articles from the available stream - in case of Atom feeds, method will paginate
+        throughout the entire blog feed and collect all articles.
 
-        :return:
-        :rtype:
+        :return: List of BlogArticle objects, either BlogRSSArticle or BlogAtomArticle
+        :rtype: list[BlogRSSArticle or BlogAtomArticle]
         """
 
         # TODO: this should retrieve _ALL_ articles
@@ -196,7 +199,7 @@ class Feed:
         else:
             all_articles = self.feed_data.find_all("entry")
             for article in all_articles:
-                _rtcl = BlogAtomArticle(article_tag=article)
+                _rtcl = BlogAtomArticle(article_tag=article, encoding=self.site_encoding)
                 articles_list.append(_rtcl)
         return articles_list
 
@@ -205,30 +208,42 @@ class BlogArticle:
 
     def __init__(self, article_id, title, content, author, published_date, last_edited_date=None,
                  blog_link=None, feed_link=None, comments_list=None):
-        """ todo: add docs
+        """ Parent class of the possible blog article objects - BlogRSSArticle and BlogAtomArticle. Children objects
+        initialize this object after they've performed their own initialization via their respective way (direct
+        assigning of parameters versus provision of a Tag object for the child object to scan on its own).
 
-        :param article_id:
-        :type article_id:
-        :param title:
-        :type title:
-        :param content:
-        :type content:
-        :param author:
-        :type author:
-        :param published_date:
-        :type published_date:
-        :param last_edited_date:
-        :type last_edited_date:
-        :param blog_link:
-        :type blog_link:
-        :param feed_link:
-        :type feed_link:
-        :param comments_list:
-        :type comments_list:
+        :param article_id: Unique Blogger-generated ID for the article.
+        :type article_id: str
+        :param title: Title of the article.
+        :type title: str
+        :param content: Content of the article.
+        :type content: str
+        :param author: Author of the comment, ideally an instance of the BlogAuthor class. If a string is provided
+                    instead, the constructor will initialize a basic BlogAuthor object, setting the provided string as
+                    a username of the author.
+        :type author: Union[BlogAuthor, str]
+        :param published_date: Ideally a Datetime object of when the article was posted, timezone awareness encouraged,
+                            but if a simple string is provided instead, it will be probed for the known feed date
+                            formats; if none match, current date and time will be set.
+        :type published_date: Union[datetime, str]
+        :param last_edited_date: Ideally a Datetime object of when the article was last updated, timezone awareness
+                            encouraged, but if a simple string is provided instead, it will be probed for the known feed
+                            date formats; if none match, current date and time will be set.
+                            If none has been provided, will be left as None.
+                            Optional parameter.
+        :type last_edited_date: Union[datetime, str, None]
+        :param blog_link: Link to the article in the blog as-is. Optional parameter.
+        :type blog_link: str
+        :param feed_link: Link to the article in the feed. Atom-only. Optional parameter.
+        :type feed_link: str
+        :param comments_list: List of comments that have been added to this specific article, all entries in the list
+                    are instances of the BlogComment object. Empty list will be generated if no comments are present.
+        :type comments_list: list[BlogComment]
         """
         if article_id is None or published_date is None or title is None or content is None or author is None:
             raise ValueError(f"You must provide the necessary attributes - article_id, published_date, title, content "
                              f"and author")
+
         # TODO: rework dates and authors
         self.article_id = article_id
         self.title = title
@@ -344,24 +359,33 @@ class BlogRSSArticle(BlogArticle):
 
     def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None,
                  last_edited_date=None, blog_link=None, article_tag=None):
-        """ TODO: add docs
+        """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the RSS stream.
 
-        :param article_id:
-        :type article_id:
-        :param title:
-        :type title:
-        :param content:
-        :type content:
-        :param author:
-        :type author:
-        :param published_date:
-        :type published_date:
-        :param last_edited_date:
-        :type last_edited_date:
-        :param blog_link:
-        :type blog_link:
-        :param article_tag:
-        :type article_tag:
+        :param article_id: Unique Blogger-generated ID for the article.
+        :type article_id: str
+        :param title: Title of the article.
+        :type title: str
+        :param content: Content of the article.
+        :type content: str
+        :param author: Author of the comment, ideally an instance of the BlogAuthor class. If a string is provided
+                    instead, the constructor will initialize a basic BlogAuthor object, setting the provided string as
+                    a username of the author.
+        :type author: Union[BlogAuthor, str]
+        :param published_date: Ideally a Datetime object of when the article was posted, timezone awareness encouraged,
+                            but if a simple string is provided instead, it will be probed for the known feed date
+                            formats; if none match, current date and time will be set.
+        :type published_date: Union[datetime, str]
+        :param last_edited_date: Ideally a Datetime object of when the article was last updated, timezone awareness
+                            encouraged, but if a simple string is provided instead, it will be probed for the known feed
+                            date formats; if none match, current date and time will be set.
+                            If none has been provided, will be left as None.
+                            Optional parameter.
+        :type last_edited_date: Union[datetime, str, None]
+        :param blog_link: Link to the article in the blog as-is. Optional parameter.
+        :type blog_link: str
+        :param article_tag: BeautifulSoup Tag element of the article, in other words, the <item> HTML tag that surrounds
+                            each article entry in the feed.
+        :type article_tag: Tag
         """
         if article_tag is None and (article_id is None or title is None or content is None or published_date is None
                                     or author is None):
@@ -393,29 +417,39 @@ class BlogRSSArticle(BlogArticle):
 class BlogAtomArticle(BlogArticle):
 
     def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None, article_tag=None,
-                 last_edited_date=None, blog_link=None, feed_link=None, comments=None):
-        """ TODO: add docs
+                 last_edited_date=None, blog_link=None, feed_link=None, comments=None, encoding="UTF-8"):
+        """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the Atom stream.
 
-        :param article_id:
-        :type article_id:
-        :param title:
-        :type title:
-        :param content:
-        :type content:
-        :param author:
-        :type author:
-        :param published_date:
-        :type published_date:
-        :param article_tag:
-        :type article_tag:
-        :param last_edited_date:
-        :type last_edited_date:
-        :param blog_link:
-        :type blog_link:
-        :param feed_link:
-        :type feed_link:
-        :param comments:
-        :type comments:
+        :param article_id: Unique Blogger-generated ID for the article.
+        :type article_id: str
+        :param title: Title of the article.
+        :type title: str
+        :param content: Content of the article.
+        :type content: str
+        :param author: Author of the comment, ideally an instance of the BlogAuthor class. If a string is provided
+                    instead, the constructor will initialize a basic BlogAuthor object, setting the provided string as
+                    a username of the author.
+        :type author: Union[BlogAuthor, str]
+        :param published_date: Ideally a Datetime object of when the article was posted, timezone awareness encouraged,
+                            but if a simple string is provided instead, it will be probed for the known feed date
+                            formats; if none match, current date and time will be set.
+        :type published_date: Union[datetime, str]
+        :param last_edited_date: Ideally a Datetime object of when the article was last updated, timezone awareness
+                            encouraged, but if a simple string is provided instead, it will be probed for the known feed
+                            date formats; if none match, current date and time will be set.
+                            If none has been provided, will be left as None.
+                            Optional parameter.
+        :type last_edited_date: Union[datetime, str, None]
+        :param article_tag: BeautifulSoup Tag element of the article, in other words, the <item> HTML tag that surrounds
+                            each article entry in the feed.
+        :type article_tag: Tag
+        :param blog_link: Link to the article in the blog as-is. Optional parameter.
+        :type blog_link: str
+        :param feed_link: Link to the article in the feed. Atom-only. Optional parameter.
+        :type feed_link: str
+        :param encoding: Preferred encoding for when collecting and initializing the comments objects, defaulting to
+                        "UTF-8".
+        :type encoding: str
         """
         if article_tag is None and (article_id is None or title is None or content is None or published_date is None
                                     or author is None):
@@ -448,7 +482,7 @@ class BlogAtomArticle(BlogArticle):
                     _comments_url = link.get('href')
                     _http = urllib3.PoolManager()
                     _conn = _http.request("GET", _comments_url)
-                    _comments_soup = BeautifulSoup(_conn.data, features="lxml")
+                    _comments_soup = BeautifulSoup(_conn.data.decode(encoding), features="lxml")
                     _comments_retrieved = _comments_soup.find_all('entry')
                     if len(_comments_retrieved) > 0:
                         for comment in _comments_retrieved:
