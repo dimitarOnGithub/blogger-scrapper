@@ -1,5 +1,6 @@
 import warnings
 from datetime import datetime
+from bs4.element import Tag
 import urllib3
 from urllib3.exceptions import NewConnectionError
 from bs4 import BeautifulSoup
@@ -9,7 +10,7 @@ import codecs
 
 class Blogsite:
 
-    def __init__(self, site, feed="atom", plain_text=False):
+    def __init__(self, site, feed="atom"):
         """ Constructor for the Blogsite object to be used as a high-level interface for working with the site's
         content. This constructor initializes the Feed class which provides access to the blog articles.
 
@@ -17,9 +18,6 @@ class Blogsite:
         :type site: str
         :param feed: Type of the feed, defaulting to 'atom'.
         :type feed: str
-        :param plain_text: Boolean flag deciding whether the site's content (articles and comments) should be parsed as
-                    plain text or if HTML should be kept as-is.
-        :type plain_text: bool
         """
         self.canonical_url = None
         self._encoding = None
@@ -122,9 +120,9 @@ class Feed:
         :param url: URL to the feed.
         :type url: str
         :param feed_type: Type of the feed - RSS or atom
-        :type feed_type: str['rss', 'atom]
+        :type feed_type: str
         """
-        if feed_type.lower() != "rss" or feed_type.lower() != "atom":
+        if feed_type.lower() != "rss" and feed_type.lower() != "atom":
             raise ValueError(f"Provided '{feed_type}' is neither an Atom feed, nor an RSS feed")
 
         self.url = url
@@ -139,11 +137,11 @@ class Feed:
         except NewConnectionError:
             raise ConnectionError(f"Failed to load '{self.feed_type}' at '{self.url}'")
 
-        _soup = BeautifulSoup(_conn.data, features="lxml")
+        self.feed_data = BeautifulSoup(_conn.data, features="lxml")
         try:
-            _start_index = int(_soup.find('opensearch:startindex').text)
-            _total_results = int(_soup.find('opensearch:totalresults').text)
-            _items_per_page = int(_soup.find('opensearch:itemsperpage').text)
+            _start_index = int(self.feed_data.find('opensearch:startindex').text)
+            _total_results = int(self.feed_data.find('opensearch:totalresults').text)
+            _items_per_page = int(self.feed_data.find('opensearch:itemsperpage').text)
             self.total_results = _total_results
             self.results_per_page = _items_per_page
             self.pages = (_total_results // _items_per_page) + 1
@@ -162,90 +160,91 @@ class Feed:
                           f"so only retrieving the first {self.results_per_page} entries without any comments")
 
         if feed_type == "atom":
-            _links = _soup.find_all('link')
+            _links = self.feed_data.find_all('link')
             for link in _links:
                 if link.has_attr('rel') and 'next' in link.get('rel'):
                     self.next_page_url = link.get('href')
 
-    def get_articles(self):
-        pass
+    def fetch_first(self):
+        """ TODO: add docs
+
+        :return:
+        :rtype:
+        """
+        if self.feed_type == "rss":
+            first_article = self.feed_data.find("item")
+            blog_article = BlogRSSArticle(article_tag=first_article)
+        else:
+            first_article = self.feed_data.find("entry")
+            blog_article = BlogAtomArticle(article_tag=first_article)
+        return blog_article
+
+    def fetch_all(self):
+        """ TODO: add docs
+
+        :return:
+        :rtype:
+        """
+
+        # TODO: this should retrieve _ALL_ articles
+        articles_list = []
+        if self.feed_type == "rss":
+            all_articles = self.feed_data.find_all("item")
+            for article in all_articles:
+                _rtcl = BlogRSSArticle(article_tag=article)
+                articles_list.append(_rtcl)
+        else:
+            all_articles = self.feed_data.find_all("entry")
+            for article in all_articles:
+                _rtcl = BlogAtomArticle(article_tag=article)
+                articles_list.append(_rtcl)
+        return articles_list
 
 
 class BlogArticle:
 
-    def __init__(self, blog_id=None, title=None, content=None, published_date=None, last_updated_date=None, author=None,
-                 comments=None, article_url=None):
-        """ Constructor for the BlogArticle object. You can either pass a direct feed URL to the article via the
-        `article_url` parameter or assign the attributes directly.
+    def __init__(self, article_id, title, content, author, published_date, last_edited_date=None,
+                 blog_link=None, feed_link=None, comments_list=None):
+        """ todo: add docs
 
-        :param blog_id: Unique Blogger-generated ID for the article.
-        :type blog_id: str
-        :param title: Title of the article.
-        :type title: str
-        :param content: Content of the article, specifically the text found between the <content> HTML tags.
-        :type content: str
-        :param published_date: Datetime object of when the article was posted, timezone awareness encouraged.
-        :type published_date: datetime
-        :param last_updated_date: Datetime object of when the article was last updated, timezone awareness encouraged.
-        :type last_updated_date: datetime
-        :param author: Author of the comment, instance of the BlogAuthor class.
-        :type author: BlogAuthor
-        :param comments: List of comments that have been added to this specific article, all entries in the list are
-                    instances of the BlogComment object. Empty list will be generated if no comments are present.
-        :type comments: List[BlogComment]
-        :param article_url: Feed URL to the article.
-        :type article_url: str
+        :param article_id:
+        :type article_id:
+        :param title:
+        :type title:
+        :param content:
+        :type content:
+        :param author:
+        :type author:
+        :param published_date:
+        :type published_date:
+        :param last_edited_date:
+        :type last_edited_date:
+        :param blog_link:
+        :type blog_link:
+        :param feed_link:
+        :type feed_link:
+        :param comments_list:
+        :type comments_list:
         """
-        if article_url is None and (blog_id is None or title is None or content is None or published_date is None
-                                    or author is None):
-            raise ValueError(f"You must provide either a feed URL for the blog article or the necessary attributes")
-
-        if article_url:
-            _http = urllib3.PoolManager()
-            try:
-                _conn = _http.request("GET", article_url)
-            except NewConnectionError:
-                raise ConnectionError(f"Failed to load article at '{article_url}'")
-            _soup = BeautifulSoup(_conn.data, features="lxml")
-            _article = _soup.find('entry')
-            if not _article:
-                raise RuntimeError(f"Failed to load article at '{article_url}'")
-
-            self.article_url = article_url
-            if _article.find('id'):
-                self.blog_id = _article.find('id').text.split("-")[-1]
-            if _article.find('title'):
-                self.title = _article.find('title').text
-            if _article.find('content'):
-                self.content = _article.find('content').text
-            if _article.find('published'):
-                self.published_date = datetime.fromisoformat(_article.find('published').text)
-            if _article.find('updated'):
-                self.last_updated_date = datetime.fromisoformat(_article.find('updated').text)
-            if _article.find('author'):
-                _author = _article.find('author')
-                self.author = BlogAuthor(author_tag=_author)
-            _links = _soup.find_all('link')
-            self.comments = []
-            for link in _links:
-                if link.get('rel')[0] == 'replies' and link.get('type') == "application/atom+xml":
-                    _comments_url = link.get('href')
-                    _conn = _http.request("GET", _comments_url)
-                    _comments_soup = BeautifulSoup(_conn.data, features="lxml")
-                    _comments_retrieved = _comments_soup.find_all('entry')
-                    if len(_comments_retrieved) > 0:
-                        for comment in _comments_retrieved:
-                            article_comment = BlogComment(comment_tag=comment, article_backref=self.blog_id)
-                            self.comments.append(article_comment)
+        if article_id is None or published_date is None or title is None or content is None or author is None:
+            raise ValueError(f"You must provide the necessary attributes - article_id, published_date, title, content "
+                             f"and author")
+        # TODO: rework dates and authors
+        self.article_id = article_id
+        self.title = title
+        self.content = content
+        self.author = author
+        self.published_date = published_date
+        if last_edited_date is not None:
+            self.last_edited_date = last_edited_date
+        if blog_link is not None:
+            self.blog_link = blog_link
+        if feed_link is not None:
+            self.feed_link = feed_link
+        if comments_list is not None:
+            self.comments = comments_list
         else:
-            self.article_url = ""
-            self.blog_id = blog_id
-            self.title = title
-            self.content = content
-            self.published_date = published_date
-            self.last_updated_date = last_updated_date
-            self.author = author
-            self.comments = comments
+            self.comments = []
 
 
 class BlogAuthor:
@@ -339,3 +338,125 @@ class BlogComment:
                           f"comment will still be saved but no article information will be available for it.")
         else:
             self.article_backref = article_backref
+
+
+class BlogRSSArticle(BlogArticle):
+
+    def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None,
+                 last_edited_date=None, blog_link=None, article_tag=None):
+        """ TODO: add docs
+
+        :param article_id:
+        :type article_id:
+        :param title:
+        :type title:
+        :param content:
+        :type content:
+        :param author:
+        :type author:
+        :param published_date:
+        :type published_date:
+        :param last_edited_date:
+        :type last_edited_date:
+        :param blog_link:
+        :type blog_link:
+        :param article_tag:
+        :type article_tag:
+        """
+        if article_tag is None and (article_id is None or title is None or content is None or published_date is None
+                                    or author is None):
+            raise ValueError(f"You must provide either a feed URL for the blog article or the necessary attributes")
+
+        if article_tag is None:
+            super().__init__(article_id, title, content, author, published_date, last_edited_date=last_edited_date,
+                             blog_link=blog_link)
+        else:
+            if not isinstance(article_tag, Tag):
+                raise ValueError(f"Provided 'article_tag' is not an instance of the BeautifulSoup's Tag class")
+            if article_tag.name != 'item':
+                raise ValueError(f"Couldn't verify provided 'article_tag' parameter contains the <item> HTML tag for "
+                                 f"an RSS article")
+
+            id = article_tag.find("guid").text.split("-")[-1]
+            title = article_tag.find("title").text
+            content = article_tag.find("description").text
+            _author = article_tag.find("author").text
+            _author = _author.split(" ")
+            _author_email = _author[0]
+            _author_name = re.sub("[()]", "", _author[1])
+            author = BlogAuthor(_author_name, "", _author_email, "")
+            published_date = article_tag.find("pubdate").text
+            updated_date = article_tag.find("atom:updated").text
+            super().__init__(id, title, content, author, published_date, last_edited_date=updated_date)
+
+
+class BlogAtomArticle(BlogArticle):
+
+    def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None, article_tag=None,
+                 last_edited_date=None, blog_link=None, feed_link=None, comments=None):
+        """ TODO: add docs
+
+        :param article_id:
+        :type article_id:
+        :param title:
+        :type title:
+        :param content:
+        :type content:
+        :param author:
+        :type author:
+        :param published_date:
+        :type published_date:
+        :param article_tag:
+        :type article_tag:
+        :param last_edited_date:
+        :type last_edited_date:
+        :param blog_link:
+        :type blog_link:
+        :param feed_link:
+        :type feed_link:
+        :param comments:
+        :type comments:
+        """
+        if article_tag is None and (article_id is None or title is None or content is None or published_date is None
+                                    or author is None):
+            raise ValueError(f"You must provide either a feed URL for the blog article or the necessary attributes")
+
+        if article_tag is None:
+            super().__init__(article_id, title, content, author, published_date, last_edited_date=last_edited_date,
+                             blog_link=blog_link, feed_link=feed_link, comments_list=comments)
+        else:
+            if not isinstance(article_tag, Tag):
+                raise ValueError(f"Provided 'article_tag' is not an instance of the BeautifulSoup's Tag class")
+            if article_tag.name != 'entry':
+                raise ValueError(f"Couldn't verify provided 'article_tag' parameter contains the <entry> HTML tag for "
+                                 f"an Atom article")
+
+            _article = article_tag
+            article_id = _article.find('id').text.split("-")[-1]
+            title = _article.find('title').text
+            content = _article.find('content').text
+            published_date = datetime.fromisoformat(_article.find('published').text)
+            last_updated_date = datetime.fromisoformat(_article.find('updated').text)
+            _author = _article.find('author')
+            author = BlogAuthor(author_tag=_author)
+            _links = _article.find_all('link')
+            comments = []
+            _feed_url = None
+            _blog_url = None
+            for link in _links:
+                if link.get('rel')[0] == 'replies' and link.get('type') == "application/atom+xml":
+                    _comments_url = link.get('href')
+                    _http = urllib3.PoolManager()
+                    _conn = _http.request("GET", _comments_url)
+                    _comments_soup = BeautifulSoup(_conn.data, features="lxml")
+                    _comments_retrieved = _comments_soup.find_all('entry')
+                    if len(_comments_retrieved) > 0:
+                        for comment in _comments_retrieved:
+                            article_comment = BlogComment(comment_tag=comment, article_backref=article_id)
+                            comments.append(article_comment)
+                elif link.get('rel')[0] == 'self' and link.get('type') == "application/atom+xml":
+                    _feed_url = link.get('href')
+                elif link.get('rel')[0] == 'alternate' and link.get('type') == "text/html":
+                    _blog_url = link.get('href')
+            super().__init__(article_id, title, content, author, published_date, last_edited_date=last_updated_date,
+                             blog_link=_blog_url, feed_link=_feed_url, comments_list=comments)
