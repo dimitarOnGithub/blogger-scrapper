@@ -204,6 +204,13 @@ class Feed:
         return articles_list
 
 
+class FeedPage:
+
+    def __init__(self):
+        # TODO: Create constructor
+        pass
+
+
 class BlogArticle:
 
     def __init__(self, article_id, title, content, author, published_date, last_edited_date=None,
