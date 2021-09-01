@@ -2,6 +2,8 @@ import warnings
 from concurrent.futures.process import ProcessPoolExecutor
 from ctypes import Union
 from datetime import datetime
+from multiprocessing import Manager
+from time import sleep
 from bs4.element import Tag
 import urllib3
 from urllib3.exceptions import NewConnectionError
@@ -140,6 +142,8 @@ class Feed:
         self.site_encoding = site_encoding
         self.total_results = 0
         self.pages = {}
+        self._lock = Manager().Lock()
+        self._all_fetched_articles = []
         _http = urllib3.PoolManager()
         try:
             _conn = _http.request("GET", self.url)
@@ -149,20 +153,26 @@ class Feed:
         _feed_data = BeautifulSoup(_conn.data.decode(self.site_encoding), features="lxml")
         try:
             _start_index = int(_feed_data.find('opensearch:startindex').text)
-            _total_results = int(_feed_data.find('opensearch:totalresults').text)
+            self.total_results = int(_feed_data.find('opensearch:totalresults').text)
             _items_per_page = int(_feed_data.find('opensearch:itemsperpage').text)
             _page_number = 0
-            while _start_index + _items_per_page < _total_results:
+            while _start_index + _items_per_page < self.total_results + _items_per_page:
                 _page_number += 1
+                if _start_index + _items_per_page < self.total_results:
+                    _expected_articles = _items_per_page
+                else:
+                    _expected_articles = self.total_results - _start_index
                 if self.feed_type == "rss":
                     _page_url = f"{self.url}&start-index={_start_index}&max-results={_items_per_page}"
                     page = FeedPage(page_number=_page_number, page_type=self.feed_type,
-                                    url=_page_url, encoding=self.site_encoding)
+                                    url=_page_url, encoding=self.site_encoding,
+                                    articles_num=_expected_articles)
                     self.pages[_page_number] = page
                 elif self.feed_type == "atom":
                     _page_url = f"{self.url}?start-index={_start_index}&max-results={_items_per_page}"
                     page = FeedPage(page_number=_page_number, page_type=self.feed_type,
-                                    url=_page_url, encoding=self.site_encoding)
+                                    url=_page_url, encoding=self.site_encoding,
+                                    articles_num=_expected_articles)
                     self.pages[_page_number] = page
                 _start_index = _start_index + _items_per_page
         except ValueError:
@@ -208,14 +218,19 @@ class Feed:
         all_articles = []
         if page_number is None:
             with ProcessPoolExecutor(max_workers=10) as executor:
-                for page, articles in zip(self.pages.values(), executor.map(self._fetch_articles, self.pages)):
-                    all_articles.append(articles)
+                for page, articles in zip(self.pages.values(), executor.map(self._fetch_articles, self.pages.values())):
+                    if len(articles) != page.expected_number_of_articles:
+                        warnings.warn(f"Couldn't successfully obtain the expected number of articles for page number "
+                                      f"{page.number}")
+                    self._save_articles(articles)
         else:
             page = self.pages.get(page_number)
             if page is None:
                 warnings.warn(f"Couldn't find page number '{page_number}' in the feed pages")
                 return None
-            all_articles.append(self._fetch_articles(page))
+            self._save_articles(self._fetch_articles(page))
+        all_articles = self._all_fetched_articles.copy()
+        self._all_fetched_articles = []
         return all_articles
 
     def _fetch_articles(self, page):
@@ -227,10 +242,18 @@ class Feed:
         :rtype: list[BlogRSSArticle, BlogAtomArticle]
         """
         http = urllib3.PoolManager()
-        try:
-            content = http.request("GET", page.url)
-        except NewConnectionError:
-            raise RuntimeError(f"Failed to fetch all articles for page number '{page.number}'")
+        while True:
+            try:
+                attempt = 1
+                content = http.request("GET", page.url)
+                if content.status != 200 and attempt <= 3:
+                    warnings.warn(f"Caught {content.status} error while attempting to retrieve content for page "
+                                  f"'{page.number}', sleeping for 5 seconds and retrying - Attempt {attempt}/3")
+                    sleep(5)
+                else:
+                    break
+            except NewConnectionError:
+                raise RuntimeError(f"Failed to fetch all articles for page number '{page.number}'")
         soup = BeautifulSoup(content.data.decode(self.site_encoding), features="lxml")
         articles_list = []
         if self.feed_type == "rss":
@@ -245,6 +268,20 @@ class Feed:
                 articles_list.append(_rtcl)
         return articles_list
 
+    def _save_articles(self, next_batch):
+        """ Hidden (private) method that utilizes multiprocessing.Manager.Lock() for when this class' 'fetch_all' method
+        is invoked; just making sure that all executor works in the 'fetch_all' method will be manipulating the
+        temporary `self._all_fetched_articles` list in a safe manner.
+
+        :param next_batch: List of the BlogArticle objects to save.
+        :type next_batch: list[BlogRSSArticles, BlogAtomArticle]
+        :return: Nothing
+        :rtype: None
+        """
+        with self._lock:
+            self._all_fetched_articles.extend(next_batch)
+        return
+
     def __str__(self):
         return (f"<Feed url='{self.url}', feed_type='{self.feed_type}', total_articles={self.total_results}, "
                 f"total_pages={len(self.pages)}>")
@@ -255,11 +292,12 @@ class Feed:
 
 class FeedPage:
 
-    def __init__(self, page_number, url, page_type, encoding):
+    def __init__(self, page_number, url, page_type, encoding, articles_num):
         self.number = page_number
         self.url = url
         self.page_type = page_type
         self.encoding = encoding
+        self.expected_number_of_articles = articles_num
 
     def get_next_page(self):
         """ Method to try and get the URL for the next iteration of the feed. Only applicable for 'Atom' feeds.
