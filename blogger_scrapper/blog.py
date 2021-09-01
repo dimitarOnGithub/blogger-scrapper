@@ -113,6 +113,12 @@ class Blogsite:
             else:
                 self.blog_feed = Feed(self.rss_link, "rss", site_encoding=self._encoding)
 
+    def __str__(self):
+        return f"<Blogsite url='{self.canonical_url}'>"
+
+    def __repr__(self):
+        return f"Blogsite('{self.canonical_url}')"
+
 
 class Feed:
 
@@ -239,6 +245,13 @@ class Feed:
                 articles_list.append(_rtcl)
         return articles_list
 
+    def __str__(self):
+        return (f"<Feed url='{self.url}', feed_type='{self.feed_type}', total_articles={self.total_results}, "
+                f"total_pages={len(self.pages)}>")
+
+    def __repr__(self):
+        return f"Feed('{self.url}', '{self.feed_type}', site_encoding='{self.site_encoding}')"
+
 
 class FeedPage:
 
@@ -285,6 +298,12 @@ class FeedPage:
             if link.has_attr('rel') and 'previous' in link.get('rel'):
                 previous_page_url = link.get('href')
         return previous_page_url
+
+    def __str__(self):
+        return f"<FeedPage url='{self.url}', page_number='{self.number}', page_type='{self.page_type}'>"
+
+    def __repr__(self):
+        return f"FeedPage({self.number}, '{self.url}', '{self.page_type}', '{self.encoding}')"
 
 
 class BlogArticle:
@@ -344,6 +363,13 @@ class BlogArticle:
         else:
             self.comments = []
 
+    def __str__(self):
+        return (f"<BlogArticle id='{self.article_id}', title='{self.title}', author='{self.author.name}', "
+                f"published={self.published_date.strftime('%d/%b/%Y')}>")
+
+    def __repr__(self):
+        return f"BlogArticle('{self.article_id}', '{self.title}')"
+
 
 class BlogAuthor:
 
@@ -381,6 +407,12 @@ class BlogAuthor:
             self.uri = uri
             self.email = email
             self.image_src = image_src
+
+    def __str__(self):
+        return f"<BlogAuthor name='{self.name}', uri='{self.uri}', email='{self.email}'>"
+
+    def __repr__(self):
+        return f"BlogAuthor('{self.name}')"
 
 
 class BlogComment:
@@ -437,10 +469,13 @@ class BlogComment:
         else:
             self.article_backref = article_backref
 
+    def __str__(self):
+        return f"<BlogComment id={self.comment_id}, author='{self.author}', backref='{self.article_backref}'"
+
 
 class BlogRSSArticle(BlogArticle):
 
-    def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None,
+    def __init__(self, article_id=None, title=None, content=None, author=None, published_date=None,
                  last_edited_date=None, blog_link=None, article_tag=None):
         """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the RSS stream.
 
@@ -496,10 +531,17 @@ class BlogRSSArticle(BlogArticle):
             updated_date = article_tag.find("atom:updated").text
             super().__init__(id, title, content, author, published_date, last_edited_date=updated_date)
 
+    def __str__(self):
+        return (f"<BlogRSSArticle id='{self.article_id}', title='{self.title}', author='{self.author.name}', "
+                f"published={self.published_date.strftime('%d/%b/%Y')}>")
+
+    def __repr__(self):
+        return f"BlogRSSArticle('{self.article_id}', '{self.title}')"
+
 
 class BlogAtomArticle(BlogArticle):
 
-    def __init__(self, article_id=None, title=None, content=None,  author=None, published_date=None, article_tag=None,
+    def __init__(self, article_id=None, title=None, content=None, author=None, published_date=None, article_tag=None,
                  last_edited_date=None, blog_link=None, feed_link=None, comments=None, encoding="UTF-8"):
         """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the Atom stream.
 
@@ -577,3 +619,10 @@ class BlogAtomArticle(BlogArticle):
                     _blog_url = link.get('href')
             super().__init__(article_id, title, content, author, published_date, last_edited_date=last_updated_date,
                              blog_link=_blog_url, feed_link=_feed_url, comments_list=comments)
+
+    def __str__(self):
+        return (f"<BlogAtomArticle id='{self.article_id}', title='{self.title}', author='{self.author.name}', "
+                f"published={self.published_date.strftime('%d/%b/%Y')}>")
+
+    def __repr__(self):
+        return f"BlogAtomArticle('{self.article_id}', '{self.title}')"
