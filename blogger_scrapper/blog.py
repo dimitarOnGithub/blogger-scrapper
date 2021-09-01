@@ -1,4 +1,5 @@
 import warnings
+from concurrent.futures.process import ProcessPoolExecutor
 from ctypes import Union
 from datetime import datetime
 from bs4.element import Tag
@@ -122,6 +123,8 @@ class Feed:
         :type url: str
         :param feed_type: Type of the feed - RSS or atom
         :type feed_type: str
+        :param site_encoding: Optional encoding type to use when scrapping the articles and comments.
+        :type site_encoding: str
         """
         if feed_type.lower() != "rss" and feed_type.lower() != "atom":
             raise ValueError(f"Provided '{feed_type}' is neither an Atom feed, nor an RSS feed")
@@ -129,75 +132,108 @@ class Feed:
         self.url = url
         self.feed_type = feed_type
         self.site_encoding = site_encoding
-        self.current_page = 0
-        self.pages = 0
         self.total_results = 0
-        self.results_per_page = 0
+        self.pages = {}
         _http = urllib3.PoolManager()
         try:
             _conn = _http.request("GET", self.url)
         except NewConnectionError:
             raise ConnectionError(f"Failed to load '{self.feed_type}' at '{self.url}'")
 
-        self.feed_data = BeautifulSoup(_conn.data.decode(self.site_encoding), features="lxml")
+        _feed_data = BeautifulSoup(_conn.data.decode(self.site_encoding), features="lxml")
         try:
-            _start_index = int(self.feed_data.find('opensearch:startindex').text)
-            _total_results = int(self.feed_data.find('opensearch:totalresults').text)
-            _items_per_page = int(self.feed_data.find('opensearch:itemsperpage').text)
-            self.total_results = _total_results
-            self.results_per_page = _items_per_page
-            self.pages = (_total_results // _items_per_page) + 1
-            if _start_index == 1:
-                self.current_page = 1
-            elif _start_index - 1 > _items_per_page:
-                self.current_page = 2
-            else:
-                self.current_page = (_start_index // _items_per_page) + 1
-        except (AttributeError, ValueError):
-            raise RuntimeError(f"Failed to load '{self.feed_type}' at '{self.url}' - couldn't obtain feed items "
-                               f"information")
+            _start_index = int(_feed_data.find('opensearch:startindex').text)
+            _total_results = int(_feed_data.find('opensearch:totalresults').text)
+            _items_per_page = int(_feed_data.find('opensearch:itemsperpage').text)
+            _page_number = 0
+            while _start_index + _items_per_page < _total_results:
+                _page_number += 1
+                if self.feed_type == "rss":
+                    _page_url = f"{self.url}&start-index={_start_index}&max-results={_items_per_page}"
+                    page = FeedPage(page_number=_page_number, page_type=self.feed_type,
+                                    url=_page_url, encoding=self.site_encoding)
+                    self.pages[_page_number] = page
+                elif self.feed_type == "atom":
+                    _page_url = f"{self.url}?start-index={_start_index}&max-results={_items_per_page}"
+                    page = FeedPage(page_number=_page_number, page_type=self.feed_type,
+                                    url=_page_url, encoding=self.site_encoding)
+                    self.pages[_page_number] = page
+                _start_index = _start_index + _items_per_page
+        except ValueError:
+            warnings.warn(f"Failed to obtain Feed information for feed at '{self.url}'")
 
-        if feed_type == "rss" and self.pages > 1:
-            warnings.warn(f"More than 1 page of results detected for '{self.url}'; RSS feed doesn't allow paginating "
-                          f"so only retrieving the first {self.results_per_page} entries without any comments")
+    def fetch_first(self, page_number=1):
+        """ Method fetches the first article for the provided `page_number` parameter.
 
-        if feed_type == "atom":
-            _links = self.feed_data.find_all('link')
-            for link in _links:
-                if link.has_attr('rel') and 'next' in link.get('rel'):
-                    self.next_page_url = link.get('href')
-
-    def fetch_first(self):
-        """ Method fetches the first article in the current feed stream.
-
+        :param page_number: Optional page number to retrieve the first article from.
+        :type page_number: int
         :return: BlogArticle object, either BlogRSSArticle or BlogAtomArticle
         :rtype: Union[BlogRSSArticle, BlogAtomArticle]
         """
-        if self.feed_type == "rss":
-            first_article = self.feed_data.find("item")
-            blog_article = BlogRSSArticle(article_tag=first_article)
+        page = self.pages.get(page_number)
+        if page:
+            http = urllib3.PoolManager()
+            try:
+                content = http.request("GET", page.url)
+            except NewConnectionError:
+                raise RuntimeError(f"Failed to fetch all articles for page number '{page_number}'")
+            soup = BeautifulSoup(content.data.decode(self.site_encoding), features="lxml")
+            if self.feed_type == "rss":
+                first_article = soup.find("item")
+                blog_article = BlogRSSArticle(article_tag=first_article)
+            else:
+                first_article = soup.find("entry")
+                blog_article = BlogAtomArticle(article_tag=first_article, encoding=self.site_encoding)
+            return blog_article
         else:
-            first_article = self.feed_data.find("entry")
-            blog_article = BlogAtomArticle(article_tag=first_article, encoding=self.site_encoding)
-        return blog_article
+            warnings.warn(f"Couldn't find page number '{page_number}' in the feed pages")
+            return None
 
-    def fetch_all(self):
-        """ Method fetches all articles from the available stream - in case of Atom feeds, method will paginate
-        throughout the entire blog feed and collect all articles.
+    def fetch_all(self, page_number=None):
+        """ Method fetches all articles from all FeedPage objects saved in the self.pages attribute. If the optional
+        parameter `page_number` has been provided, the method will instead fetch all articles only for that specified
+        page.
 
+        :param page_number: Optional page number to retrieve the first article from.
+        :type page_number: int
         :return: List of BlogArticle objects, either BlogRSSArticle or BlogAtomArticle
         :rtype: list[BlogRSSArticle or BlogAtomArticle]
         """
+        all_articles = []
+        if page_number is None:
+            with ProcessPoolExecutor(max_workers=10) as executor:
+                for page, articles in zip(self.pages.values(), executor.map(self._fetch_articles, self.pages)):
+                    all_articles.append(articles)
+        else:
+            page = self.pages.get(page_number)
+            if page is None:
+                warnings.warn(f"Couldn't find page number '{page_number}' in the feed pages")
+                return None
+            all_articles.append(self._fetch_articles(page))
+        return all_articles
 
-        # TODO: this should retrieve _ALL_ articles
+    def _fetch_articles(self, page):
+        """ Hidden (private) method used to fetch articles for the provided `page` parameter.
+
+        :param page: The page object from which to collect data.
+        :type page: FeedPage
+        :return: List of all articles.
+        :rtype: list[BlogRSSArticle, BlogAtomArticle]
+        """
+        http = urllib3.PoolManager()
+        try:
+            content = http.request("GET", page.url)
+        except NewConnectionError:
+            raise RuntimeError(f"Failed to fetch all articles for page number '{page.number}'")
+        soup = BeautifulSoup(content.data.decode(self.site_encoding), features="lxml")
         articles_list = []
         if self.feed_type == "rss":
-            all_articles = self.feed_data.find_all("item")
+            all_articles = soup.find_all("item")
             for article in all_articles:
                 _rtcl = BlogRSSArticle(article_tag=article)
                 articles_list.append(_rtcl)
         else:
-            all_articles = self.feed_data.find_all("entry")
+            all_articles = soup.find_all("entry")
             for article in all_articles:
                 _rtcl = BlogAtomArticle(article_tag=article, encoding=self.site_encoding)
                 articles_list.append(_rtcl)
@@ -206,9 +242,49 @@ class Feed:
 
 class FeedPage:
 
-    def __init__(self):
-        # TODO: Create constructor
-        pass
+    def __init__(self, page_number, url, page_type, encoding):
+        self.number = page_number
+        self.url = url
+        self.page_type = page_type
+        self.encoding = encoding
+
+    def get_next_page(self):
+        """ Method to try and get the URL for the next iteration of the feed. Only applicable for 'Atom' feeds.
+
+        :return: URL to the next page.
+        :rtype: str
+        """
+        next_page_url = None
+        http = urllib3.PoolManager()
+        try:
+            content = http.request("GET", self.url)
+        except NewConnectionError:
+            return next_page_url
+        soup = BeautifulSoup(content.data.decode(self.encoding), features="lxml")
+        _links = soup.find_all('link')
+        for link in _links:
+            if link.has_attr('rel') and 'next' in link.get('rel'):
+                next_page_url = link.get('href')
+        return next_page_url
+
+    def get_previous_page(self):
+        """ Method to try and get the URL for the previous iteration of the feed. Only applicable for 'Atom' feeds.
+
+        :return: URL to the previous page.
+        :rtype: str
+        """
+        previous_page_url = None
+        http = urllib3.PoolManager()
+        try:
+            content = http.request("GET", self.url)
+        except NewConnectionError:
+            return previous_page_url
+        soup = BeautifulSoup(content.data.decode(self.encoding), features="lxml")
+        _links = soup.find_all('link')
+        for link in _links:
+            if link.has_attr('rel') and 'previous' in link.get('rel'):
+                previous_page_url = link.get('href')
+        return previous_page_url
 
 
 class BlogArticle:
