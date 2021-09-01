@@ -228,6 +228,10 @@ class Feed:
             if page is None:
                 warnings.warn(f"Couldn't find page number '{page_number}' in the feed pages")
                 return None
+            returned_articles = self._fetch_articles(page)
+            if len(returned_articles) != page.expected_number_of_articles:
+                warnings.warn(f"Couldn't successfully obtain the expected number of articles for page number "
+                              f"{page.number}")
             self._save_articles(self._fetch_articles(page))
         all_articles = self._all_fetched_articles.copy()
         self._all_fetched_articles = []
