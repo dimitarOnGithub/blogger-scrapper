@@ -23,6 +23,9 @@ class BlogArticleMapping:
         If article_id is provided with value 'unique_article_number', when scrapper is performing the export of data,
         the field, that on Blogger is called 'article_id', will be called 'unique_article_number' in the export.
         """
+        for attribute in self._blog_article_attributes:
+            setattr(self, attribute, attribute)
+
         for attr_name, mapping_name in kwargs.items():
             if attr_name in self._blog_article_attributes:
                 setattr(self, attr_name, mapping_name)
@@ -30,10 +33,29 @@ class BlogArticleMapping:
                 warnings.warn(f"Unknown keyword argument: '{attr_name}'; provided arguments must match attributes of "
                               f"the BlogArticle class")
 
+    def get_mapping(self, attr_name):
+        """ Method to return the mapping value of the provided `attr_name` parameter, eg:
+
+        get_mapping('title') -> self.title = 'name' -> returned value is 'name'
+
+        If the provided `attr_name` parameter doesn't match an existing attribute, None is returned.
+
+        :param attr_name: Attribute name to look for.
+        :type attr_name: str
+        :return: The mapping value of the attribute.
+        :rtype: str
+        """
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        else:
+            warnings.warn(f"Unknown attribute name: '{attr_name}'")
+            return None
+
 
 class BlogAuthorMapping:
 
     _blog_author_attributes = [
+        "author_id",
         "name",
         "uri",
         "email",
@@ -48,12 +70,33 @@ class BlogAuthorMapping:
         If name is provided with value 'username', when scrapper is performing the export of data, the field, that on
         Blogger is called 'name', will be called 'username' in the export.
         """
+        for attribute in self._blog_author_attributes:
+            setattr(self, attribute, attribute)
+
         for attr_name, mapping_name in kwargs.items():
             if attr_name in self._blog_author_attributes:
                 setattr(self, attr_name, mapping_name)
             else:
                 warnings.warn(f"Unknown keyword argument: '{attr_name}'; provided arguments must match attributes of "
                               f"the BlogAuthor class")
+
+    def get_mapping(self, attr_name):
+        """ Method to return the mapping value of the provided `attr_name` parameter, eg:
+
+        get_mapping('title') -> self.title = 'name' -> returned value is 'name'
+
+        If the provided `attr_name` parameter doesn't match an existing attribute, None is returned.
+
+        :param attr_name: Attribute name to look for.
+        :type attr_name: str
+        :return: The mapping value of the attribute.
+        :rtype: str
+        """
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        else:
+            warnings.warn(f"Unknown attribute name: '{attr_name}'")
+            return None
 
 
 class BlogCommentMapping:
@@ -74,9 +117,30 @@ class BlogCommentMapping:
         If content is provided with value 'body', when scrapper is performing the export of data, the field, that on
         Blogger is called 'content', will be called 'body' in the export.
         """
+        for attribute in self._blog_comment_attributes:
+            setattr(self, attribute, attribute)
+
         for attr_name, mapping_name in kwargs.items():
             if attr_name in self._blog_comment_attributes:
                 setattr(self, attr_name, mapping_name)
             else:
                 warnings.warn(f"Unknown keyword argument: '{attr_name}'; provided arguments must match attributes of "
                               f"the BlogComment class")
+
+    def get_mapping(self, attr_name):
+        """ Method to return the mapping value of the provided `attr_name` parameter, eg:
+
+        get_mapping('content') -> self.content = 'body' -> returned value is 'body'
+
+        If the provided `attr_name` parameter doesn't match an existing attribute, None is returned.
+
+        :param attr_name: Attribute name to look for.
+        :type attr_name: str
+        :return: The mapping value of the attribute.
+        :rtype: str
+        """
+        if hasattr(self, attr_name):
+            return getattr(self, attr_name)
+        else:
+            warnings.warn(f"Unknown attribute name: '{attr_name}'")
+            return None
