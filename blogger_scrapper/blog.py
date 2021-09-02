@@ -357,7 +357,7 @@ class BlogArticle:
         assigning of parameters versus provision of a Tag object for the child object to scan on its own).
 
         :param article_id: Unique Blogger-generated ID for the article.
-        :type article_id: str
+        :type article_id: int
         :param title: Title of the article.
         :type title: str
         :param content: Content of the article.
@@ -388,20 +388,61 @@ class BlogArticle:
             raise ValueError(f"You must provide the necessary attributes - article_id, published_date, title, content "
                              f"and author")
 
-        # TODO: rework dates and authors
-        self.article_id = article_id
-        self.title = title
-        self.content = content
-        self.author = author
-        self.published_date = published_date
-        if last_edited_date is not None:
-            self.last_edited_date = last_edited_date
+        self.article_id = article_id  # type: int
+        self.title = title  # type: str
+        self.content = content  # type: str
+
+        if isinstance(author, str):
+            self.author = BlogAuthor(name=author, uri="", author_id=-1, email="dummy-email@dummy.com", image_src="")
+        elif isinstance(author, BlogAuthor):
+            self.author = author  # type: BlogAuthor
+        else:
+            raise ValueError(f"Provided 'author' parameter is neither a str, nor an instance of BlogAuthor")
+        if isinstance(published_date, str):
+            try:
+                # ISO format is the usual Atom date format
+                self.published_date = datetime.fromisoformat(published_date)
+            except ValueError:
+                pass
+            try:
+                # Thu, 06 May 2021 14:51:00 +0000 is an example RSS article Published date format
+                self.published_date = datetime.strptime(published_date, '%a, %d %b %Y %H:%M:%S %z')
+            except ValueError:
+                self.published_date = datetime.now()
+        elif isinstance(published_date, datetime):
+            self.published_date = published_date  # type: datetime
+        else:
+            raise ValueError(f"Provided 'published_date' parameter is neither a str, nor an instance of datetime")
+
+        if last_edited_date:
+            if isinstance(last_edited_date, str):
+                try:
+                    # ISO format is the usual Atom date format
+                    self.last_edited_date = datetime.fromisoformat(last_edited_date)
+                except ValueError:
+                    pass
+                try:
+                    # Thu, 06 May 2021 14:51:00 +0000 is an example RSS article Published date format
+                    self.last_edited_date = datetime.strptime(last_edited_date, '%a, %d %b %Y %H:%M:%S %z')
+                except ValueError:
+                    self.last_edited_date = datetime.now()
+            elif isinstance(last_edited_date, datetime):
+                self.last_edited_date = last_edited_date  # type: datetime
+            else:
+                raise ValueError(f"Provided 'last_edited_date' parameter is neither a str, nor an instance of datetime")
+        else:
+            self.last_edited_date = self.published_date
+
         if blog_link is not None:
-            self.blog_link = blog_link
+            self.blog_link = blog_link  # type: str
+        else:
+            self.blog_link = ""
         if feed_link is not None:
-            self.feed_link = feed_link
+            self.feed_link = feed_link  # type: str
+        else:
+            self.feed_link = ""
         if comments_list is not None:
-            self.comments = comments_list
+            self.comments = comments_list  # type: list[BlogComment]
         else:
             self.comments = []
 
@@ -415,7 +456,7 @@ class BlogArticle:
 
 class BlogAuthor:
 
-    def __init__(self, name=None, uri=None, email=None, image_src=None, author_tag=None):
+    def __init__(self, name=None, uri=None, author_id=None, email=None, image_src=None, author_tag=None):
         """ Constructor for the BlogAuthor object. Can either be initialized via the BeautifulSoup Tag object, passed
         to this method via the `author_tag` attribute, or attributed can be assigned directly via the rest of the
         available parameters.
@@ -431,27 +472,39 @@ class BlogAuthor:
         :param author_tag: BeautifulSoup object of the author, specifically the <author> HTML tags that encapsulate it.
         :type author_tag: bs4.element.Tag
         """
-        if author_tag is None and (name is None or uri is None or email is None or image_src is None):
+        if author_tag is None and (name is None or uri is None or author_id is None or email is None or
+                                   image_src is None):
             raise ValueError(f"You must provide either an author tag object for the blog author or the necessary"
                              f" attributes")
 
         if author_tag:
             if author_tag.find('name'):
-                self.name = author_tag.find('name').text
+                self.name = author_tag.find('name').text  # type: str
+            else:
+                self.name = "Anonymous"
             if author_tag.find('uri'):
-                self.uri = author_tag.find('uri').text
+                self.uri = author_tag.find('uri').text  # type: str
+                self.author_id = int(self.uri.split("/")[-1])
+            else:
+                self.uri = "Dummy-URI"
+                self.author_id = -1
             if author_tag.find('email'):
-                self.email = author_tag.find('email').text
+                self.email = author_tag.find('email').text  # type: str
+            else:
+                self.email = "dummy-email@dummy.com"
             if author_tag.find('gd:image'):
-                self.image_src = author_tag.find('gd:image').get('src')
+                self.image_src = author_tag.find('gd:image').get('src')  # type: str
+            else:
+                self.image_src = ""
         else:
-            self.name = name
-            self.uri = uri
-            self.email = email
-            self.image_src = image_src
+            self.name = name  # type: str
+            self.uri = uri  # type: str
+            self.author_id = author_id  # type: int
+            self.email = email  # type: str
+            self.image_src = image_src  # type: str
 
     def __str__(self):
-        return f"<BlogAuthor name='{self.name}', uri='{self.uri}', email='{self.email}'>"
+        return f"<BlogAuthor name='{self.name}', author_id={self.author_id}>"
 
     def __repr__(self):
         return f"BlogAuthor('{self.name}')"
@@ -465,7 +518,7 @@ class BlogComment:
         passed via the `comment_tag` attribute, or by directly assigning the values.
 
         :param comment_id: Unique Blogger-generated ID for the comment
-        :type comment_id: str
+        :type comment_id: int
         :param content: Content of the comment, extracted from the <content> tag surrounding the comment body.
         :type content: str
         :param published_date: Datetime object of when the comment was posted, timezone awareness encouraged.
@@ -476,7 +529,7 @@ class BlogComment:
         :type author: BlogAuthor
         :param article_backref: Backreference ID of the article on which the comment was posted, useful for looking up
                         which article it belongs to.
-        :type article_backref: str
+        :type article_backref: int
         :param comment_tag: BeautifulSoup object of the comment, specifically the <entry> HTML tags that encapsulate it.
         :type comment_tag: bs4.element.Tag
         """
@@ -486,30 +539,43 @@ class BlogComment:
                              f" attributes")
 
         # TODO: Add logic to simply assign empty values to non-critical attributes
+        # TODO: verify type of provided value and rework them
         if comment_tag:
             if comment_tag.find('id'):
-                self.comment_id = comment_tag.find('id').text.split("-")[-1]
+                self.comment_id = int(comment_tag.find('id').text.split("-")[-1])  # type: int
+            else:
+                self.comment_id = -1
             if comment_tag.find('content'):
-                self.content = comment_tag.find('content').text
+                self.content = comment_tag.find('content').text  # type: str
+            else:
+                self.content = "Dummy Content"
             if comment_tag.find('published'):
-                self.published_date = datetime.fromisoformat(comment_tag.find('published').text)
+                self.published_date = datetime.fromisoformat(comment_tag.find('published').text)  # type: datetime
+            else:
+                self.published_date = datetime.now()
             if comment_tag.find('updated'):
-                self.last_updated_date = datetime.fromisoformat(comment_tag.find('updated').text)
+                self.last_updated_date = datetime.fromisoformat(comment_tag.find('updated').text)  # type: datetime
+            else:
+                self.last_updated_date = self.published_date
             if comment_tag.find('author'):
                 _author = comment_tag.find('author')
                 self.author = BlogAuthor(author_tag=_author)
+            else:
+                self.author = BlogAuthor(name="Anonymous", uri="", author_id=-1, email="dummy-email@dummy.com",
+                                         image_src="")
         else:
-            self.comment_id = comment_id
-            self.content = content
-            self.published_date = published_date
-            self.last_updated_date = last_updated_date
-            self.author = author
+            self.comment_id = comment_id  # type: int
+            self.content = content  # type: str
+            self.published_date = published_date  # type: datetime
+            self.last_updated_date = last_updated_date  # type: datetime
+            self.author = author  # type: BlogAuthor
 
         if article_backref is None:
             warnings.warn(f"No article backref value has been provided for comment with id '{self.comment_id}', "
                           f"comment will still be saved but no article information will be available for it.")
+            self.article_backref = -1
         else:
-            self.article_backref = article_backref
+            self.article_backref = article_backref  # type: int
 
     def __str__(self):
         return f"<BlogComment id={self.comment_id}, author='{self.author}', backref='{self.article_backref}'"
@@ -522,7 +588,7 @@ class BlogRSSArticle(BlogArticle):
         """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the RSS stream.
 
         :param article_id: Unique Blogger-generated ID for the article.
-        :type article_id: str
+        :type article_id: int
         :param title: Title of the article.
         :type title: str
         :param content: Content of the article.
@@ -568,7 +634,7 @@ class BlogRSSArticle(BlogArticle):
             _author = _author.split(" ")
             _author_email = _author[0]
             _author_name = re.sub("[()]", "", _author[1])
-            author = BlogAuthor(_author_name, "", _author_email, "")
+            author = BlogAuthor(_author_name, "", -1, _author_email, "")
             published_date = article_tag.find("pubdate").text
             updated_date = article_tag.find("atom:updated").text
             super().__init__(id, title, content, author, published_date, last_edited_date=updated_date)
@@ -588,7 +654,7 @@ class BlogAtomArticle(BlogArticle):
         """ Child object of the BlogArticle class, specifically aimed at articles retrieved via the Atom stream.
 
         :param article_id: Unique Blogger-generated ID for the article.
-        :type article_id: str
+        :type article_id: int
         :param title: Title of the article.
         :type title: str
         :param content: Content of the article.
@@ -633,7 +699,7 @@ class BlogAtomArticle(BlogArticle):
                                  f"an Atom article")
 
             _article = article_tag
-            article_id = _article.find('id').text.split("-")[-1]
+            article_id = int(_article.find('id').text.split("-")[-1])
             title = _article.find('title').text
             content = _article.find('content').text
             published_date = datetime.fromisoformat(_article.find('published').text)
