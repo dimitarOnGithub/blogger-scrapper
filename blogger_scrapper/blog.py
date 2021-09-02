@@ -286,6 +286,42 @@ class Feed:
             self._all_fetched_articles.extend(next_batch)
         return
 
+    def get_all_authors(self, articles_list):
+        """ Method to obtain all unique authors from the provided `articles_list`, this includes all authors of comments
+        for the articles.
+
+        :param articles_list:
+        :type articles_list: list[BlogRSSArticle, BlogAtomArticle]
+        :return: List of all authors.
+        :rtype: list[BlogAuthor]
+        """
+        authors_set = set()
+        for article in articles_list:
+            authors_set.add(article.author)
+            if len(article.comments) > 0:
+                for comm in article.comments:
+                    authors_set.add(comm.author)
+        return list(authors_set)
+
+    def get_all_comments(self, articles_list):
+        """ Method to obtain all comments from the provided `articles_list`.
+
+        :param articles_list:
+        :type articles_list: list[BlogRSSArticle, BlogAtomArticle]
+        :return: List of all comments.
+        :rtype: list[BlogComment]
+        """
+        if self.feed_type == "rss":
+            warnings.warn(f"Feed type is 'RSS', cannot retrieve comments info")
+            return None
+        else:
+            comments_set = set()
+            for article in articles_list:
+                if len(article.comments) > 0:
+                    for art_comm in article.comments:
+                        comments_set.add(art_comm)
+            return list(comments_set)
+
     def __str__(self):
         return (f"<Feed url='{self.url}', feed_type='{self.feed_type}', total_articles={self.total_results}, "
                 f"total_pages={len(self.pages)}>")
@@ -453,6 +489,18 @@ class BlogArticle:
     def __repr__(self):
         return f"BlogArticle('{self.article_id}', '{self.title}')"
 
+    def __hash__(self):
+        if self.article_id != -1:
+            return hash(self.article_id)
+        else:
+            return hash(self.title + self.published_date.strftime("%Y-%m-%d"))
+
+    def __eq__(self, other):
+        if isinstance(other, BlogArticle):
+            return self.__hash__() == other.__hash__()
+        else:
+            return False
+
 
 class BlogAuthor:
 
@@ -484,7 +532,10 @@ class BlogAuthor:
                 self.name = "Anonymous"
             if author_tag.find('uri'):
                 self.uri = author_tag.find('uri').text  # type: str
-                self.author_id = int(self.uri.split("/")[-1])
+                try:
+                    self.author_id = int(self.uri.split("/")[-1])
+                except ValueError:
+                    self.author_id = -1
             else:
                 self.uri = "Dummy-URI"
                 self.author_id = -1
@@ -508,6 +559,18 @@ class BlogAuthor:
 
     def __repr__(self):
         return f"BlogAuthor('{self.name}')"
+
+    def __hash__(self):
+        if self.author_id != -1:
+            return hash(self.author_id)
+        else:
+            return hash(self.name + self.uri)
+
+    def __eq__(self, other):
+        if isinstance(other, BlogAuthor):
+            return self.__hash__() == other.__hash__()
+        else:
+            return False
 
 
 class BlogComment:
@@ -538,8 +601,6 @@ class BlogComment:
             raise ValueError(f"You must provide either a comment tag object for the comment or the necessary"
                              f" attributes")
 
-        # TODO: Add logic to simply assign empty values to non-critical attributes
-        # TODO: verify type of provided value and rework them
         if comment_tag:
             if comment_tag.find('id'):
                 self.comment_id = int(comment_tag.find('id').text.split("-")[-1])  # type: int
@@ -579,6 +640,18 @@ class BlogComment:
 
     def __str__(self):
         return f"<BlogComment id={self.comment_id}, author='{self.author}', backref='{self.article_backref}'"
+
+    def __hash__(self):
+        if self.comment_id != -1:
+            return hash(self.comment_id)
+        else:
+            return hash(self.content + self.published_date.strftime("%Y-%m-%d"))
+
+    def __eq__(self, other):
+        if isinstance(other, BlogComment):
+            return self.__hash__() == other.__hash__()
+        else:
+            return False
 
 
 class BlogRSSArticle(BlogArticle):
