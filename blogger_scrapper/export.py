@@ -1,6 +1,9 @@
+import os
 import warnings
 from datetime import datetime
 from pathlib import Path
+
+from dicttoxml import dicttoxml
 
 from blogger_scrapper import BlogArticleMapping, BlogAuthorMapping, BlogCommentMapping, BlogArticle, BlogAuthor, \
     BlogComment
@@ -169,16 +172,19 @@ class SqlExport:
         conn.commit()
 
 
-class JsonExport:
+class FileExport:
 
-    def __init__(self, all_articles_list, all_authors_list, all_comments_list, encoding):
+    def __init__(self, all_articles_list, all_authors_list, all_comments_list, export_type, encoding):
         self.all_articles = all_articles_list  # type: list[BlogArticle]
         self.all_authors = all_authors_list  # type: list[BlogAuthor]
         self.all_comments = all_comments_list  # type: list[BlogComment]
+        if export_type not in ['xml', 'json']:
+            raise ValueError(f"Provided export_type parameter doesn't match one of the expected values - json or xml")
+        self.export_type = export_type
         self.encoding = encoding
 
     def do_export(self, export_of="all"):
-        """ The export method for the JsonExport class - generates the output file and write all the collected data.
+        """ The export method for the FileExport class - generates the output file and write all the collected data.
         Optional parameter `export_of` could be provided if instead of dumping all data, only specific subsection of it
         is required (only articles, authors or comments).
 
@@ -312,6 +318,18 @@ class JsonExport:
                     'article_ref': comment.article_backref
                 }
 
-        with open(f"{output_dir}/json_export-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json", "w+",
-                  encoding=self.encoding) as f:
-            f.write(json.dumps(data_dict, indent=4, ensure_ascii=False))
+        if self.export_type == 'json':
+            with open(f"{output_dir}/json_export-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json", "w+",
+                      encoding=self.encoding) as f:
+                f.write(json.dumps(data_dict, indent=4, ensure_ascii=False))
+        else:
+            tmp_file = f"{output_dir}/.tmp-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json"
+            with open(tmp_file, "w+", encoding=self.encoding) as f:
+                f.write(json.dumps(data_dict, indent=4, ensure_ascii=False))
+            with open(tmp_file, "r+") as f:
+                data = json.load(f)
+            os.remove(tmp_file)
+            xml_dom = {"export": data}
+            xml_data = dicttoxml(xml_dom)
+            with open(f"{output_dir}/xml_export-{datetime.now().strftime('%d%m%Y-%H%M%S')}.xml", "wb") as f:
+                f.write(xml_data)

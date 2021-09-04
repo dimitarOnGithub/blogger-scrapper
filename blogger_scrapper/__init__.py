@@ -5,7 +5,7 @@
 from blogger_scrapper.scrapper import Scrapper
 from blogger_scrapper.blog import Blogsite, BlogArticle, BlogAuthor, BlogComment
 from blogger_scrapper.mapping import BlogArticleMapping, BlogAuthorMapping, BlogCommentMapping
-from blogger_scrapper.export import SqlExport, JsonExport
+from blogger_scrapper.export import SqlExport, FileExport
 
 __all__ = (
     "Scrapper",
@@ -17,5 +17,5 @@ __all__ = (
     "BlogAuthorMapping",
     "BlogCommentMapping",
     "SqlExport",
-    "JsonExport"
+    "FileExport"
 )
