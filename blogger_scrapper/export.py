@@ -5,6 +5,7 @@ from pathlib import Path
 from blogger_scrapper import BlogArticleMapping, BlogAuthorMapping, BlogCommentMapping, BlogArticle, BlogAuthor, \
     BlogComment
 import sqlite3
+import json
 
 
 class SqlExport:
@@ -166,3 +167,151 @@ class SqlExport:
         cursor.executemany(f"INSERT INTO {self.articles_table_name}_{self.comments_table_name} VALUES "
                            f"(?, ?)", arts_comms_for_insertion)
         conn.commit()
+
+
+class JsonExport:
+
+    def __init__(self, all_articles_list, all_authors_list, all_comments_list, encoding):
+        self.all_articles = all_articles_list  # type: list[BlogArticle]
+        self.all_authors = all_authors_list  # type: list[BlogAuthor]
+        self.all_comments = all_comments_list  # type: list[BlogComment]
+        self.encoding = encoding
+
+    def do_export(self, export_of="all"):
+        """ The export method for the JsonExport class - generates the output file and write all the collected data.
+        Optional parameter `export_of` could be provided if instead of dumping all data, only specific subsection of it
+        is required (only articles, authors or comments).
+
+        :param export_of: Optional parameter to define the scope of the export.
+        :type export_of: str
+        """
+        if export_of not in ['all', 'authors', 'comments']:
+            raise ValueError(f"Provided 'export_of' parameter value must match one of - all, authors, comments")
+
+        output_dir = Path('output')
+        if not Path.exists(output_dir) or not Path.is_dir(output_dir):
+            output_dir = Path(f"output-tmp-{datetime.now().strftime('%d%m%Y-%H%M%S%f')}")
+            warnings.warn(f"Default output/ directory doesn't exist or is not a directory, creating a temporary new "
+                          f"directory called {output_dir.name}")
+            Path.mkdir(output_dir, exist_ok=True)
+
+        if export_of == "all":
+            data_dict = {
+                'articles': {},
+                'authors': {},
+                'comments': {}
+            }
+            i = 0
+            for article in self.all_articles:
+                articles = data_dict.get('articles')
+                i += 1
+                articles[f"article-{i}"] = {
+                    'id': article.article_id,
+                    'title': article.title,
+                    'content': article.content,
+                    'author': f"{article.author.author_id}-{article.author.name}",
+                    'published_date': article.published_date.isoformat(),
+                    'last_edited_date': article.last_edited_date.isoformat(),
+                    'blog_link': article.blog_link,
+                    'feed_link': article.feed_link,
+                    'comments': {}
+                }
+                if len(article.comments) > 0:
+                    comments = data_dict.get('articles').get(f'article-{i}').get('comments')
+                    c = 0
+                    for comment in article.comments:
+                        c += 1
+                        comments[f"comment-{c}"] = {
+                            'id': comment.comment_id,
+                            'content': comment.content,
+                            'published_date': comment.published_date.isoformat(),
+                            'last_edited_date': comment.last_updated_date.isoformat(),
+                            'author': f"{comment.author.author_id}-{comment.author.name}",
+                            'article_ref': comment.article_backref
+                        }
+
+            i = 0
+            for author in self.all_authors:
+                authors = data_dict.get('authors')
+                i += 1
+                authors[f"author-{i}"] = {
+                    'id': author.author_id,
+                    'uri': author.uri,
+                    'name': author.name,
+                    'email': author.email,
+                    'image_src': author.image_src
+                }
+
+            i = 0
+            for comment in self.all_comments:
+                comments = data_dict.get('comments')
+                i += 1
+                comments[f"comment-{i}"] = {
+                    'id': comment.comment_id,
+                    'content': comment.content,
+                    'published_date': comment.published_date.isoformat(),
+                    'last_edited_date': comment.last_updated_date.isoformat(),
+                    'author': f"{comment.author.author_id}-{comment.author.name}",
+                    'article_ref': comment.article_backref
+                }
+
+        elif export_of == "articles":
+            data_dict = {}
+            i = 0
+            for article in self.all_articles:
+                i += 1
+                data_dict[f"article-{i}"] = {
+                    'id': article.article_id,
+                    'title': article.title,
+                    'content': article.content,
+                    'author': f"{article.author.author_id}-{article.author.name}",
+                    'published_date': article.published_date.isoformat(),
+                    'last_edited_date': article.last_edited_date.isoformat(),
+                    'blog_link': article.blog_link,
+                    'feed_link': article.feed_link,
+                    'comments': {}
+                }
+                if len(article.comments) > 0:
+                    comments = data_dict.get('articles').get(f'{article}-{i}').get('comments')
+                    c = 0
+                    for comment in article.comments:
+                        c += 1
+                        comments[f"comment-{c}"] = {
+                            'id': comment.comment_id,
+                            'content': comment.content,
+                            'published_date': comment.published_date.isoformat(),
+                            'last_edited_date': comment.last_updated_date.isoformat(),
+                            'author': f"{comment.author.author_id}-{comment.author.name}",
+                            'article_ref': comment.article_backref
+                        }
+
+        elif export_of == "authors":
+            data_dict = {}
+            i = 0
+            for author in self.all_authors:
+                i += 1
+                data_dict[f"author-{i}"] = {
+                    'id': author.author_id,
+                    'uri': author.uri,
+                    'name': author.name,
+                    'email': author.email,
+                    'image_src': author.image_src
+                }
+
+        else:
+            data_dict = {}
+            i = 0
+            for comment in self.all_comments:
+                i += 1
+                data_dict[f"comment-{i}"] = {
+                    'id': comment.comment_id,
+                    'content': comment.content,
+                    'published_date': comment.published_date.isoformat(),
+                    'last_edited_date': comment.last_updated_date.isoformat(),
+                    'author': f"{comment.author.author_id}-{comment.author.name}",
+                    'article_ref': comment.article_backref
+                }
+
+        with open(f"{output_dir}/json_export-{datetime.now().strftime('%d%m%Y-%H%M%S')}.json", "w+",
+                  encoding=self.encoding) as f:
+            f.write(json.dumps(data_dict, indent=4, ensure_ascii=False))
