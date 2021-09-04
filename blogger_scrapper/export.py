@@ -2,13 +2,12 @@ import os
 import warnings
 from datetime import datetime
 from pathlib import Path
-
 from dicttoxml import dicttoxml
-
-from blogger_scrapper import BlogArticleMapping, BlogAuthorMapping, BlogCommentMapping, BlogArticle, BlogAuthor, \
-    BlogComment
 import sqlite3
 import json
+
+from blogger_scrapper.mapping import BlogArticleMapping, BlogAuthorMapping, BlogCommentMapping
+from blogger_scrapper.blog import BlogArticle, BlogAuthor, BlogComment
 
 
 class SqlExport:
@@ -174,10 +173,10 @@ class SqlExport:
 
 class FileExport:
 
-    def __init__(self, all_articles_list, all_authors_list, all_comments_list, export_type, encoding):
-        self.all_articles = all_articles_list  # type: list[BlogArticle]
-        self.all_authors = all_authors_list  # type: list[BlogAuthor]
-        self.all_comments = all_comments_list  # type: list[BlogComment]
+    def __init__(self, articles, authors, comments, export_type="json", encoding="UTF-8"):
+        self.all_articles = articles  # type: list[BlogArticle]
+        self.all_authors = authors  # type: list[BlogAuthor]
+        self.all_comments = comments  # type: list[BlogComment]
         if export_type not in ['xml', 'json']:
             raise ValueError(f"Provided export_type parameter doesn't match one of the expected values - json or xml")
         self.export_type = export_type

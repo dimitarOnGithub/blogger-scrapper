@@ -64,7 +64,7 @@ class Blogsite:
                     for _split_tag in _tag:
                         try:
                             if codecs.lookup(_split_tag):
-                                self.site_encoding = _split_tag
+                                self._encoding = _split_tag
                         except LookupError:
                             continue
             if self._encoding is None:
@@ -76,11 +76,11 @@ class Blogsite:
                     for tag in _charset_tag_matches:
                         try:
                             if codecs.lookup(tag):
-                                self.site_encoding = tag
+                                self._encoding = tag
                         except LookupError:
                             continue
                 else:
-                    self.site_encoding = "UTF-8"
+                    self._encoding = "UTF-8"
         _blogger_site = False
         for tag in _meta_tags:
             if tag.has_attr('content') and tag.get('content') == 'blogger':
@@ -313,7 +313,7 @@ class Feed:
         """
         if self.feed_type == "rss":
             warnings.warn(f"Feed type is 'RSS', cannot retrieve comments info")
-            return None
+            return []
         else:
             comments_set = set()
             for article in articles_list:
